@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { FaCubes, FaDownload, FaSearch, FaSpinner, FaTimes, FaTrash } from 'react-icons/fa';
+import { FaCubes, FaDownload, FaFileAlt, FaLink, FaSearch, FaSpinner, FaTimes, FaTrash } from 'react-icons/fa';
 import Navbar from '../components/Navbar';
+import ShareModal from '../components/ShareModal';
 import api from '../services/api';
 
 const formatBytes = (bytes) => {
@@ -19,10 +20,7 @@ const formatDate = (date) =>
     timeStyle: 'short'
   }).format(new Date(date));
 
-const downloadBlob = (response, fileName) => {
-  const blob = new Blob([response.data], {
-    type: response.headers['content-type'] || 'application/octet-stream'
-  });
+const downloadBlob = (blob, fileName) => {
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
 
@@ -75,10 +73,17 @@ const MyFiles = () => {
   const [downloadingFileId, setDownloadingFileId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [shareFile, setShareFile] = useState(null);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
   const [chunks, setChunks] = useState([]);
   const [chunksLoading, setChunksLoading] = useState(false);
   const [chunksError, setChunksError] = useState('');
   const [downloadingChunkId, setDownloadingChunkId] = useState(null);
+  const [downloadingTextChunkId, setDownloadingTextChunkId] = useState(null);
+  const [previewingChunkId, setPreviewingChunkId] = useState(null);
+  const [chunkTextPreviews, setChunkTextPreviews] = useState({});
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [chunkDownloadProgress, setChunkDownloadProgress] = useState(0);
 
   const fetchFiles = async (currentSearch = search) => {
     setLoading(true);
@@ -102,22 +107,48 @@ const MyFiles = () => {
     return () => clearTimeout(timer);
   }, [search]);
 
+  const openShareModal = (file) => {
+    setShareFile(file);
+    setShareModalOpen(true);
+    setError('');
+    setMessage('');
+  };
+
+  const closeShareModal = () => {
+    setShareFile(null);
+    setShareModalOpen(false);
+  };
+
+  const onShareCreated = () => {
+    setMessage('Share link created successfully.');
+  };
+
   const downloadFile = async (file) => {
     setDownloadingFileId(file.id);
+    setDownloadProgress(0);
     setError('');
     setMessage('');
 
     try {
       const response = await api.get(`/download-file/${file.id}`, {
-        responseType: 'blob'
+        responseType: 'arraybuffer',
+        onDownloadProgress: (event) => {
+          if (event.total) {
+            setDownloadProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        }
       });
 
-      downloadBlob(response, file.file_name);
+      const blob = new Blob([response.data], {
+        type: response.headers['content-type'] || 'application/octet-stream'
+      });
+      downloadBlob(blob, file.file_name);
       setMessage(`${file.file_name} downloaded successfully.`);
     } catch (downloadError) {
       setError(downloadError.response?.data?.message || 'Download failed.');
     } finally {
       setDownloadingFileId(null);
+      setDownloadProgress(0);
     }
   };
 
@@ -144,24 +175,79 @@ const MyFiles = () => {
     setChunks([]);
     setChunksError('');
     setDownloadingChunkId(null);
+    setDownloadingTextChunkId(null);
+    setPreviewingChunkId(null);
+    setChunkTextPreviews({});
   };
 
   const downloadChunk = async (chunk) => {
     if (!selectedFile) return;
 
     setDownloadingChunkId(chunk.id);
+    setChunkDownloadProgress(0);
     setChunksError('');
 
     try {
       const response = await api.get(`/download-chunk/${chunk.id}`, {
-        responseType: 'blob'
+        responseType: 'blob',
+        onDownloadProgress: (event) => {
+          if (event.total) {
+            setChunkDownloadProgress(Math.round((event.loaded / event.total) * 100));
+          }
+        }
       });
 
-      downloadBlob(response, `${selectedFile.file_name}_chunk_${chunk.chunk_index}`);
+      downloadBlob(response.data, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.part`);
     } catch (downloadError) {
       setChunksError(downloadError.response?.data?.message || 'Chunk download failed.');
     } finally {
       setDownloadingChunkId(null);
+      setChunkDownloadProgress(0);
+    }
+  };
+
+  const downloadChunkText = async (chunk) => {
+    if (!selectedFile) return;
+
+    setDownloadingTextChunkId(chunk.id);
+    setChunksError('');
+
+    try {
+      const response = await api.get(`/download-chunk-text/${chunk.id}`, {
+        responseType: 'blob'
+      });
+
+      downloadBlob(response.data, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.base64.txt`);
+    } catch (downloadError) {
+      setChunksError(downloadError.response?.data?.message || 'Readable chunk download failed.');
+    } finally {
+      setDownloadingTextChunkId(null);
+    }
+  };
+
+  const toggleChunkTextPreview = async (chunk) => {
+    if (chunkTextPreviews[chunk.id]) {
+      setChunkTextPreviews((current) => {
+        const next = { ...current };
+        delete next[chunk.id];
+        return next;
+      });
+      return;
+    }
+
+    setPreviewingChunkId(chunk.id);
+    setChunksError('');
+
+    try {
+      const response = await api.get(`/chunk-text/${chunk.id}`);
+      setChunkTextPreviews((current) => ({
+        ...current,
+        [chunk.id]: response.data
+      }));
+    } catch (previewError) {
+      setChunksError(previewError.response?.data?.message || 'Unable to load chunk text.');
+    } finally {
+      setPreviewingChunkId(null);
     }
   };
 
@@ -242,6 +328,9 @@ const MyFiles = () => {
                       Download Full File
                     </th>
                     <th className="px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
+                      Share
+                    </th>
+                    <th className="px-4 py-4 text-left text-xs font-bold uppercase tracking-wider text-slate-600">
                       Delete
                     </th>
                   </tr>
@@ -249,7 +338,7 @@ const MyFiles = () => {
                 <tbody className="divide-y divide-slate-100">
                   {loading ? (
                     <tr>
-                      <td colSpan="7" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="8" className="px-4 py-12 text-center text-slate-500">
                         <FaSpinner className="mx-auto mb-3 animate-spin text-2xl text-indigo-600" />
                         Loading files...
                       </td>
@@ -275,19 +364,40 @@ const MyFiles = () => {
                           </button>
                         </td>
                         <td className="px-4 py-4">
+                          <div className="flex min-w-28 flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => downloadFile(file)}
+                              disabled={downloadingFileId === file.id}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-indigo-600 text-white transition hover:bg-indigo-700 disabled:bg-slate-400"
+                              aria-label={`Download ${file.file_name}`}
+                              title="Download Full File"
+                            >
+                              {downloadingFileId === file.id ? (
+                                <FaSpinner className="animate-spin" />
+                              ) : (
+                                <FaDownload />
+                              )}
+                            </button>
+                            {downloadingFileId === file.id && (
+                              <div className="h-2 w-24 overflow-hidden rounded-full bg-slate-200">
+                                <div
+                                  className="h-full bg-indigo-600 transition-all"
+                                  style={{ width: `${downloadProgress || 8}%` }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-4">
                           <button
                             type="button"
-                            onClick={() => downloadFile(file)}
-                            disabled={downloadingFileId === file.id}
-                            className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-indigo-600 text-white transition hover:bg-indigo-700 disabled:bg-slate-400"
-                            aria-label={`Download ${file.file_name}`}
-                            title="Download Full File"
+                            onClick={() => openShareModal(file)}
+                            className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-emerald-600 text-white transition hover:bg-emerald-700"
+                            aria-label={`Share ${file.file_name}`}
+                            title="Share"
                           >
-                            {downloadingFileId === file.id ? (
-                              <FaSpinner className="animate-spin" />
-                            ) : (
-                              <FaDownload />
-                            )}
+                            <FaLink />
                           </button>
                         </td>
                         <td className="px-4 py-4">
@@ -310,7 +420,7 @@ const MyFiles = () => {
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="7" className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan="8" className="px-4 py-12 text-center text-slate-500">
                         No files found.
                       </td>
                     </tr>
@@ -346,7 +456,9 @@ const MyFiles = () => {
                   <h3 id="chunk-modal-title" className="text-xl font-bold text-slate-950">
                     Stored Chunks
                   </h3>
-                  <p className="mt-1 truncate text-sm text-slate-600">{selectedFile.file_name}</p>
+                  <p className="mt-1 truncate text-sm text-slate-600">
+                    {selectedFile.file_name} - raw chunk parts are not meant to open directly
+                  </p>
                 </div>
                 <button
                   type="button"
@@ -392,20 +504,67 @@ const MyFiles = () => {
                             </p>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => downloadChunk(chunk)}
-                            disabled={downloadingChunkId === chunk.id}
-                            className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-                          >
-                            {downloadingChunkId === chunk.id ? (
-                              <FaSpinner className="animate-spin" />
-                            ) : (
-                              <FaDownload />
-                            )}
-                            Download
-                          </button>
+                          <div className="flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => downloadChunk(chunk)}
+                              disabled={downloadingChunkId === chunk.id}
+                              className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                            >
+                              {downloadingChunkId === chunk.id ? (
+                                <FaSpinner className="animate-spin" />
+                              ) : (
+                                <FaDownload />
+                              )}
+                              Raw
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => downloadChunkText(chunk)}
+                              disabled={downloadingTextChunkId === chunk.id}
+                              className="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+                            >
+                              {downloadingTextChunkId === chunk.id ? (
+                                <FaSpinner className="animate-spin" />
+                              ) : (
+                                <FaFileAlt />
+                              )}
+                              Text
+                            </button>
+                          </div>
                         </div>
+                        <button
+                          type="button"
+                          onClick={() => toggleChunkTextPreview(chunk)}
+                          disabled={previewingChunkId === chunk.id}
+                          className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-md border border-indigo-200 bg-white px-3 py-2 text-sm font-bold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                        >
+                          {previewingChunkId === chunk.id ? (
+                            <FaSpinner className="animate-spin" />
+                          ) : (
+                            <FaFileAlt />
+                          )}
+                          {chunkTextPreviews[chunk.id] ? 'Hide Text' : 'Show Text'}
+                        </button>
+                        {chunkTextPreviews[chunk.id] && (
+                          <div className="mt-3 rounded-md border border-slate-200 bg-white">
+                            <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 text-xs font-bold uppercase text-slate-500">
+                              <span>{chunkTextPreviews[chunk.id].mode} preview</span>
+                              {chunkTextPreviews[chunk.id].truncated && <span>truncated</span>}
+                            </div>
+                            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-5 text-slate-800">
+                              {chunkTextPreviews[chunk.id].text}
+                            </pre>
+                          </div>
+                        )}
+                        {downloadingChunkId === chunk.id && (
+                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                            <div
+                              className="h-full bg-teal-600 transition-all"
+                              style={{ width: `${chunkDownloadProgress || 8}%` }}
+                            />
+                          </div>
+                        )}
                       </motion.article>
                     ))}
                   </motion.div>
@@ -415,6 +574,12 @@ const MyFiles = () => {
           </motion.div>
         )}
       </AnimatePresence>
+      <ShareModal
+        file={shareFile}
+        isOpen={shareModalOpen}
+        onClose={closeShareModal}
+        onShareCreated={onShareCreated}
+      />
     </div>
   );
 };

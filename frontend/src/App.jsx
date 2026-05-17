@@ -4,6 +4,8 @@ import Analytics from './pages/Analytics';
 import Dashboard from './pages/Dashboard';
 import Login from './pages/Login';
 import MyFiles from './pages/MyFiles';
+import SharedFiles from './pages/SharedFiles';
+import SharedFileView from './pages/SharedFileView';
 import Signup from './pages/Signup';
 import Upload from './pages/Upload';
 
@@ -40,6 +42,15 @@ const App = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/shared-files"
+          element={
+            <ProtectedRoute>
+              <SharedFiles />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="/shared/:token" element={<SharedFileView />} />
         <Route
           path="/analytics"
           element={

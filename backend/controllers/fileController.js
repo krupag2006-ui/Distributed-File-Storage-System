@@ -2,6 +2,8 @@ const path = require('path');
 const { chunkFile, DEFAULT_CHUNK_SIZE } = require('../utils/chunkFile');
 const mergeChunks = require('../utils/mergeChunks');
 const { deleteChunksFromCloud, downloadChunkFromCloud } = require('../utils/supabaseStorage');
+const { calculateSha256 } = require('../utils/fileHash');
+const { buildTextPreview } = require('../utils/textPreview');
 const {
   createFile,
   deleteFileByIdForUser,
@@ -10,7 +12,9 @@ const {
   getStorageAnalytics,
   getUploadsByDay
 } = require('../models/fileModel');
-const { createChunks, getChunkByIdForUser, getChunksByFile } = require('../models/chunkModel');
+const { createChunk, getChunkByIdForUser, getChunksByFile } = require('../models/chunkModel');
+const { createFileMetadata, getFileMetadataByFileId } = require('../models/fileMetadataModel');
+const { createReplicas } = require('../models/replicaModel');
 
 const sanitizeName = (name) =>
   path
@@ -31,7 +35,9 @@ const formatChunk = (chunk) => ({
   id: chunk.id,
   file_id: chunk.file_id,
   chunk_index: chunk.chunk_index,
-  chunk_size: Number(chunk.chunk_size)
+  chunk_size: Number(chunk.chunk_size),
+  chunk_hash: chunk.chunk_hash,
+  chunk_status: chunk.chunk_status
 });
 
 const uploadFile = async (req, res, next) => {
@@ -51,7 +57,6 @@ const uploadFile = async (req, res, next) => {
       return res.status(400).json({ message: 'Uploaded file cannot be empty.' });
     }
 
-    // Step 1: save the original file metadata and reserve an id for chunk names.
     createdFileId = await createFile({
       userId: req.user.id,
       fileName,
@@ -59,22 +64,39 @@ const uploadFile = async (req, res, next) => {
       chunkCount
     });
 
-    // Step 2: split the uploaded buffer and upload every chunk to Supabase Storage.
     const savedChunks = await chunkFile({
       fileId: createdFileId,
       fileBuffer: req.file.buffer
     });
+
     uploadedChunkPaths = savedChunks.map((chunk) => chunk.chunkPath);
 
-    // Step 3: persist Supabase object paths in MySQL for lookup and reconstruction.
-    await createChunks(
-      savedChunks.map((chunk) => ({
+    for (const chunk of savedChunks) {
+      const chunkId = await createChunk({
         fileId: createdFileId,
         chunkIndex: chunk.chunkIndex,
         chunkPath: chunk.chunkPath,
-        chunkSize: chunk.chunkSize
-      }))
-    );
+        chunkSize: chunk.chunkSize,
+        chunkHash: chunk.chunkHash
+      });
+
+      if (chunk.replicaPaths?.length) {
+        await createReplicas(
+          chunk.replicaPaths.map((replica) => ({
+            chunkId,
+            bucket: replica.bucket,
+            replicaPath: replica.path,
+            replicaStatus: 'active'
+          }))
+        );
+      }
+    }
+
+    const fileMetadata = await createFileMetadata({
+      fileId: createdFileId,
+      contentType: req.file.mimetype,
+      checksum: calculateSha256(req.file.buffer)
+    });
 
     const chunks = await getChunksByFile(createdFileId);
     const file = await getFileByIdForUser(createdFileId, req.user.id);
@@ -82,6 +104,7 @@ const uploadFile = async (req, res, next) => {
     return res.status(201).json({
       message: 'File uploaded, split into chunks, and saved successfully.',
       file,
+      metadata: fileMetadata,
       chunks: chunks.map(formatChunk)
     });
   } catch (error) {
@@ -151,6 +174,92 @@ const downloadChunk = async (req, res, next) => {
   }
 };
 
+const downloadChunkText = async (req, res, next) => {
+  try {
+    const chunkId = toNumber(req.params.chunkId);
+
+    if (!Number.isInteger(chunkId)) {
+      return res.status(400).json({ message: 'A valid chunk id is required.' });
+    }
+
+    const chunk = await getChunkByIdForUser(chunkId, req.user.id);
+
+    if (!chunk) {
+      return res.status(404).json({ message: 'Chunk not found.' });
+    }
+
+    const chunkBuffer = await downloadChunkFromCloud(chunk.chunk_path);
+    const actualHash = calculateSha256(chunkBuffer);
+
+    if (chunk.chunk_hash && actualHash !== chunk.chunk_hash) {
+      return res.status(500).json({
+        message: 'Chunk failed integrity validation and may be corrupted.'
+      });
+    }
+
+    const fileName = `${sanitizeName(chunk.file_name)}.chunk_${chunk.chunk_index}.base64.txt`;
+    const textPayload = [
+      `file_name=${chunk.file_name}`,
+      `chunk_index=${chunk.chunk_index}`,
+      `chunk_size=${chunkBuffer.length}`,
+      `sha256=${actualHash}`,
+      'encoding=base64',
+      '',
+      chunkBuffer.toString('base64')
+    ].join('\n');
+
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Length', String(Buffer.byteLength(textPayload)));
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+
+    return res.send(textPayload);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const getChunkTextPreview = async (req, res, next) => {
+  try {
+    const chunkId = toNumber(req.params.chunkId);
+
+    if (!Number.isInteger(chunkId)) {
+      return res.status(400).json({ message: 'A valid chunk id is required.' });
+    }
+
+    const chunk = await getChunkByIdForUser(chunkId, req.user.id);
+
+    if (!chunk) {
+      return res.status(404).json({ message: 'Chunk not found.' });
+    }
+
+    const metadata = await getFileMetadataByFileId(chunk.file_id);
+    const chunkBuffer = await downloadChunkFromCloud(chunk.chunk_path);
+    const actualHash = calculateSha256(chunkBuffer);
+
+    if (chunk.chunk_hash && actualHash !== chunk.chunk_hash) {
+      return res.status(500).json({
+        message: 'Chunk failed integrity validation and may be corrupted.'
+      });
+    }
+
+    const preview = buildTextPreview({
+      buffer: chunkBuffer,
+      contentType: metadata?.content_type || '',
+      fileName: chunk.file_name
+    });
+
+    return res.json({
+      chunk: formatChunk(chunk),
+      contentType: metadata?.content_type || 'application/octet-stream',
+      mode: preview.mode,
+      text: preview.text,
+      truncated: preview.truncated
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const listFiles = async (req, res, next) => {
   try {
     const files = await getFilesByUser(req.user.id, req.query.search || '');
@@ -181,18 +290,31 @@ const downloadFile = async (req, res, next) => {
       });
     }
 
-    // Merge chunks by chunk_index so the returned buffer matches the original file.
     const mergedFile = await mergeChunks(chunks);
-    const safeFileName = sanitizeName(file.file_name);
+    const metadata = await getFileMetadataByFileId(file.id);
 
-    res.setHeader('Content-Type', 'application/octet-stream');
+    if (metadata?.checksum) {
+      const reconstructedHash = calculateSha256(mergedFile);
+      if (reconstructedHash !== metadata.checksum) {
+        return res.status(500).json({
+          message: 'File reconstruction failed integrity validation. The reconstructed file is corrupted.'
+        });
+      }
+    }
+
+    const safeFileName = sanitizeName(file.file_name);
+    const contentType = metadata?.content_type || 'application/octet-stream';
+
+    res.setHeader('Content-Type', contentType);
     res.setHeader('Content-Length', String(mergedFile.length));
     res.setHeader(
       'Content-Disposition',
       `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(file.file_name)}`
     );
+    res.setHeader('Cache-Control', 'no-cache');
 
-    return res.send(mergedFile);
+    // Send buffer directly without any encoding
+    res.end(mergedFile);
   } catch (error) {
     next(error);
   }
@@ -244,6 +366,8 @@ module.exports = {
   uploadFile,
   getChunks,
   downloadChunk,
+  downloadChunkText,
+  getChunkTextPreview,
   listFiles,
   downloadFile,
   deleteFile,

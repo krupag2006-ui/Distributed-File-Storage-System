@@ -6,7 +6,11 @@ dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_KEY;
-const supabaseBucket = process.env.SUPABASE_BUCKET || 'chunks';
+const supabasePrimaryBucket = process.env.SUPABASE_PRIMARY_BUCKET || process.env.SUPABASE_BUCKET || 'chunks';
+const supabaseReplicaBuckets = (process.env.SUPABASE_REPLICA_BUCKETS || '')
+  .split(',')
+  .map((bucket) => bucket.trim())
+  .filter(Boolean);
 
 const decodeJwtPayload = (token) => {
   if (!token) return null;
@@ -24,9 +28,9 @@ const decodeJwtPayload = (token) => {
 const supabaseRole = decodeJwtPayload(supabaseKey)?.role;
 
 const requireSupabaseConfig = () => {
-  if (!supabaseUrl || !supabaseKey) {
+  if (!supabaseUrl || !supabaseKey || !supabasePrimaryBucket) {
     throw new Error(
-      'SUPABASE_URL and a backend Supabase key must be configured. Set SUPABASE_SERVICE_ROLE_KEY for server-side Storage uploads.'
+      'SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, and SUPABASE_PRIMARY_BUCKET must be configured. Set SUPABASE_REPLICA_BUCKETS for backup buckets.'
     );
   }
 };
@@ -41,6 +45,7 @@ if (supabaseRole === 'anon') {
 
 module.exports = {
   supabase,
-  supabaseBucket,
+  supabasePrimaryBucket,
+  supabaseReplicaBuckets,
   requireSupabaseConfig
 };

@@ -3,7 +3,9 @@ const {
   analytics,
   deleteFile,
   downloadChunk,
+  downloadChunkText,
   downloadFile,
+  getChunkTextPreview,
   getChunks,
   listFiles,
   uploadFile
@@ -20,7 +22,10 @@ router.get('/analytics', analytics);
 router.post('/upload', upload.single('file'), uploadFile);
 router.get('/:fileId/chunks', getChunks);
 router.get('/chunks/:fileId', getChunks);
+router.get('/chunk-text/:chunkId', getChunkTextPreview);
+router.get('/chunks/:chunkId/text', getChunkTextPreview);
 router.get('/download-chunk/:chunkId', downloadChunk);
+router.get('/download-chunk-text/:chunkId', downloadChunkText);
 router.get('/download-file/:fileId', downloadFile);
 router.get('/:fileId/download', downloadFile);
 router.delete('/:fileId', deleteFile);

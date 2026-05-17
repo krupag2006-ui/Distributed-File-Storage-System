@@ -45,6 +45,9 @@ const Navbar = () => {
             <NavLink to="/files" className={navLinkClass}>
               My Files
             </NavLink>
+            <NavLink to="/shared-files" className={navLinkClass}>
+              Shared Files
+            </NavLink>
             <NavLink to="/analytics" className={navLinkClass}>
               Analytics
             </NavLink>
