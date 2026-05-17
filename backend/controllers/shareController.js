@@ -3,6 +3,7 @@ const path = require('path');
 const { getFileByIdForUser, getFileById } = require('../models/fileModel');
 const { getChunksByFile } = require('../models/chunkModel');
 const { getFileMetadataByFileId } = require('../models/fileMetadataModel');
+const { getReplicasByFile } = require('../models/replicaModel');
 const {
   createShare,
   getShareByToken,
@@ -18,6 +19,28 @@ const { calculateSha256 } = require('../utils/fileHash');
 
 const toNumber = (value) => Number.parseInt(value, 10);
 const validAccessTypes = new Set(['read-only', 'download', 'edit', 'full']);
+
+const attachReplicasToChunks = (chunks, replicas) => {
+  const replicasByChunkId = new Map();
+
+  for (const replica of replicas) {
+    if (replica.replica_status && replica.replica_status !== 'active') {
+      continue;
+    }
+
+    const current = replicasByChunkId.get(replica.chunk_id) || [];
+    current.push({
+      bucket: replica.bucket,
+      path: replica.replica_path
+    });
+    replicasByChunkId.set(replica.chunk_id, current);
+  }
+
+  return chunks.map((chunk) => ({
+    ...chunk,
+    replicaSources: replicasByChunkId.get(chunk.id) || []
+  }));
+};
 
 const canAccessShare = async (share, user) => {
   if (share.is_public) return true;
@@ -208,7 +231,8 @@ const downloadSharedFile = async (req, res, next) => {
       });
     }
 
-    const mergedFile = await mergeChunks(chunks);
+    const replicas = await getReplicasByFile(file.id);
+    const mergedFile = await mergeChunks(attachReplicasToChunks(chunks, replicas));
     const metadata = await getFileMetadataByFileId(file.id);
 
     if (metadata?.checksum) {

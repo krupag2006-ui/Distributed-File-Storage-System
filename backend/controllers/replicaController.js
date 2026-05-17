@@ -23,6 +23,12 @@ const verifyBufferHash = (chunk, chunkBuffer) => {
   return calculateSha256(chunkBuffer) === chunk.chunk_hash;
 };
 
+const storageOptionsForChunk = (chunk) => ({
+  bucket: chunk.storage_bucket,
+  fileId: chunk.file_id,
+  chunkIndex: chunk.chunk_index
+});
+
 const replicateFile = async (req, res, next) => {
   try {
     const fileId = toNumber(req.body.fileId);
@@ -47,7 +53,10 @@ const replicateFile = async (req, res, next) => {
       for (const bucket of supabaseReplicaBuckets) {
         if (!replicaBuckets.includes(bucket)) {
           try {
-            const chunkBuffer = await downloadChunkFromCloud(chunk.chunk_path);
+            const chunkBuffer = await downloadChunkFromCloud(
+              chunk.chunk_path,
+              storageOptionsForChunk(chunk)
+            );
             if (!verifyBufferHash(chunk, chunkBuffer)) {
               await updateChunkHealth({ chunkId: chunk.id, status: 'corrupted' });
               throw new Error(`Chunk ${chunk.id} failed checksum verification.`);
@@ -130,7 +139,10 @@ const recoverFile = async (req, res, next) => {
 
     for (const chunk of chunks) {
       try {
-        const primaryBuffer = await downloadChunkFromCloud(chunk.chunk_path);
+        const primaryBuffer = await downloadChunkFromCloud(
+          chunk.chunk_path,
+          storageOptionsForChunk(chunk)
+        );
         if (!verifyBufferHash(chunk, primaryBuffer)) {
           await updateChunkHealth({ chunkId: chunk.id, status: 'corrupted' });
           throw new Error('Primary chunk failed checksum verification.');
@@ -145,13 +157,17 @@ const recoverFile = async (req, res, next) => {
 
         for (const replica of replicas) {
           try {
-            const chunkBuffer = await downloadChunkFromBucket(replica.bucket, replica.replica_path);
+            const chunkBuffer = await downloadChunkFromBucket(
+              replica.bucket,
+              replica.replica_path,
+              storageOptionsForChunk(chunk)
+            );
             if (!verifyBufferHash(chunk, chunkBuffer)) {
               await updateReplicaHealth({ replicaId: replica.id, status: 'corrupted' });
               throw new Error('Replica chunk failed checksum verification.');
             }
 
-            await restorePrimaryChunk(chunk.chunk_path, chunkBuffer);
+            await restorePrimaryChunk(chunk.chunk_path, chunkBuffer, chunk.storage_bucket);
             await updateReplicaHealth({ replicaId: replica.id, status: 'active' });
             await updateChunkHealth({ chunkId: chunk.id, status: 'healthy' });
             recovered = true;

@@ -1,4 +1,4 @@
-const { uploadChunkToCloud } = require('./supabaseStorage');
+const { buildChunkPath, uploadChunkToCloud } = require('./supabaseStorage');
 const { calculateSha256 } = require('./fileHash');
 
 const TEN_MB = 10 * 1024 * 1024;
@@ -9,7 +9,7 @@ const chunkFile = async ({ fileId, fileBuffer, chunkSize = DEFAULT_CHUNK_SIZE })
 
   for (let offset = 0, chunkIndex = 1; offset < fileBuffer.length; offset += chunkSize, chunkIndex += 1) {
     const chunkBuffer = fileBuffer.subarray(offset, Math.min(offset + chunkSize, fileBuffer.length));
-    const chunkName = `files/${fileId}/file${fileId}_chunk_${chunkIndex}`;
+    const chunkName = buildChunkPath(fileId, chunkIndex);
     const chunkHash = calculateSha256(chunkBuffer);
 
     const { primaryPath, replicaPaths } = await uploadChunkToCloud(chunkBuffer, chunkName);

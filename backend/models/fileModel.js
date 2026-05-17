@@ -30,6 +30,16 @@ const getFileByIdForUser = async (fileId, userId) => {
   return rows[0];
 };
 
+const getFileById = async (fileId) => {
+  const [rows] = await pool.execute(
+    `SELECT id, user_id, file_name, file_size, chunk_count, upload_date
+     FROM files
+     WHERE id = ?`,
+    [fileId]
+  );
+  return rows[0];
+};
+
 const deleteFileByIdForUser = async (fileId, userId) => {
   const [result] = await pool.execute('DELETE FROM files WHERE id = ? AND user_id = ?', [
     fileId,
@@ -68,6 +78,7 @@ const getUploadsByDay = async (userId) => {
 module.exports = {
   createFile,
   getFilesByUser,
+  getFileById,
   getFileByIdForUser,
   deleteFileByIdForUser,
   getStorageAnalytics,

@@ -1,5 +1,7 @@
 const pool = require('../config/db');
 
+const primaryStorageBucket = process.env.SUPABASE_PRIMARY_BUCKET || process.env.SUPABASE_BUCKET || 'chunks';
+
 const getColumns = async (tableName) => {
   const [rows] = await pool.execute(
     `SELECT COLUMN_NAME, IS_NULLABLE
@@ -33,8 +35,17 @@ const ensureLocalChunkSchema = async () => {
     await pool.execute('ALTER TABLE chunks ADD COLUMN chunk_path VARCHAR(1024) NULL AFTER chunk_index');
   }
 
+  if (!columns.has('storage_bucket')) {
+    await pool.execute('ALTER TABLE chunks ADD COLUMN storage_bucket VARCHAR(100) NULL AFTER chunk_path');
+  }
+
+  await pool.execute(
+    'UPDATE chunks SET storage_bucket = ? WHERE storage_bucket IS NULL OR storage_bucket = ?',
+    [primaryStorageBucket, '']
+  );
+
   if (!columns.has('chunk_size')) {
-    await pool.execute('ALTER TABLE chunks ADD COLUMN chunk_size BIGINT UNSIGNED NULL AFTER chunk_path');
+    await pool.execute('ALTER TABLE chunks ADD COLUMN chunk_size BIGINT UNSIGNED NULL AFTER storage_bucket');
   }
 
   if (!columns.has('chunk_hash')) {

@@ -2,7 +2,6 @@ const express = require('express');
 const {
   analytics,
   deleteFile,
-  downloadChunk,
   downloadChunkText,
   downloadFile,
   getChunkTextPreview,
@@ -23,8 +22,7 @@ router.post('/upload', upload.single('file'), uploadFile);
 router.get('/:fileId/chunks', getChunks);
 router.get('/chunks/:fileId', getChunks);
 router.get('/chunk-text/:chunkId', getChunkTextPreview);
-router.get('/chunks/:chunkId/text', getChunkTextPreview);
-router.get('/download-chunk/:chunkId', downloadChunk);
+router.get('/chunks/:chunkId/text', downloadChunkText);
 router.get('/download-chunk-text/:chunkId', downloadChunkText);
 router.get('/download-file/:fileId', downloadFile);
 router.get('/:fileId/download', downloadFile);

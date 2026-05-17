@@ -23,7 +23,8 @@ app.use(
       'https://distributed-file-storage-system.vercel.app',
       'https://distributed-file-storage-system-d1b8muvbl-charishmap3s-projects.vercel.app'
     ],
-    credentials: true
+    credentials: true,
+    exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type']
   })
 );
 app.use(express.json({ limit: '1mb' }));
@@ -81,8 +82,10 @@ app.use((error, req, res, next) => {
     return res.status(413).json({ message: 'File exceeds the configured maximum upload size.' });
   }
 
+  const statusCode = Number.isInteger(error.statusCode) ? error.statusCode : 500;
+
   console.error(error);
-  return res.status(500).json({
+  return res.status(statusCode).json({
     message: error.message || 'Something went wrong on the server.'
   });
 });

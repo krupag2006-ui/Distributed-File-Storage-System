@@ -32,6 +32,119 @@ const downloadBlob = (blob, fileName) => {
   window.URL.revokeObjectURL(url);
 };
 
+const fileNameFromDisposition = (contentDisposition) => {
+  if (!contentDisposition) return '';
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8Match?.[1]) {
+    try {
+      return decodeURIComponent(utf8Match[1].replace(/"/g, ''));
+    } catch (error) {
+      return utf8Match[1].replace(/"/g, '');
+    }
+  }
+
+  const fileNameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+  return fileNameMatch?.[1] || '';
+};
+
+const responseFileName = (response, fallback) =>
+  fileNameFromDisposition(response.headers?.['content-disposition']) || fallback;
+
+const messageFromText = (text, fallback) => {
+  if (!text) return fallback;
+
+  try {
+    return JSON.parse(text).message || fallback;
+  } catch (error) {
+    return text || fallback;
+  }
+};
+
+const downloadErrorMessage = async (downloadError, fallback) => {
+  const data = downloadError.response?.data;
+
+  if (data?.message) {
+    return data.message;
+  }
+
+  if (data instanceof Blob) {
+    return messageFromText(await data.text(), fallback);
+  }
+
+  if (data instanceof ArrayBuffer) {
+    return messageFromText(new TextDecoder().decode(data), fallback);
+  }
+
+  if (typeof data === 'string') {
+    return messageFromText(data, fallback);
+  }
+
+  return fallback;
+};
+
+const CODE_KEYWORDS = new Set([
+  'abstract',
+  'async',
+  'await',
+  'boolean',
+  'break',
+  'catch',
+  'class',
+  'const',
+  'def',
+  'else',
+  'extends',
+  'final',
+  'for',
+  'from',
+  'function',
+  'if',
+  'import',
+  'int',
+  'let',
+  'new',
+  'private',
+  'protected',
+  'public',
+  'return',
+  'static',
+  'string',
+  'try',
+  'var',
+  'void',
+  'while'
+]);
+
+const highlightTokenPattern =
+  /(\/\/.*|#.*|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b[A-Za-z_][A-Za-z0-9_]*\b|\d+(?:\.\d+)?)/g;
+
+const highlightedPreview = (text) =>
+  text.split(highlightTokenPattern).map((token, index) => {
+    if (!token) return null;
+
+    let className = '';
+    const lowerToken = token.toLowerCase();
+
+    if (token.startsWith('//') || token.startsWith('#')) {
+      className = 'text-slate-500';
+    } else if (token.startsWith('"') || token.startsWith("'")) {
+      className = 'text-emerald-700';
+    } else if (CODE_KEYWORDS.has(lowerToken)) {
+      className = 'font-semibold text-indigo-700';
+    } else if (/^\d/.test(token)) {
+      className = 'text-amber-700';
+    }
+
+    return className ? (
+      <span key={`${token}-${index}`} className={className}>
+        {token}
+      </span>
+    ) : (
+      token
+    );
+  });
+
 const modalVariants = {
   hidden: { opacity: 0 },
   visible: { opacity: 1 },
@@ -78,12 +191,10 @@ const MyFiles = () => {
   const [chunks, setChunks] = useState([]);
   const [chunksLoading, setChunksLoading] = useState(false);
   const [chunksError, setChunksError] = useState('');
-  const [downloadingChunkId, setDownloadingChunkId] = useState(null);
   const [downloadingTextChunkId, setDownloadingTextChunkId] = useState(null);
   const [previewingChunkId, setPreviewingChunkId] = useState(null);
   const [chunkTextPreviews, setChunkTextPreviews] = useState({});
   const [downloadProgress, setDownloadProgress] = useState(0);
-  const [chunkDownloadProgress, setChunkDownloadProgress] = useState(0);
 
   const fetchFiles = async (currentSearch = search) => {
     setLoading(true);
@@ -130,8 +241,8 @@ const MyFiles = () => {
     setMessage('');
 
     try {
-      const response = await api.get(`/download-file/${file.id}`, {
-        responseType: 'arraybuffer',
+      const response = await api.get(`/files/${file.id}/download`, {
+        responseType: 'blob',
         onDownloadProgress: (event) => {
           if (event.total) {
             setDownloadProgress(Math.round((event.loaded / event.total) * 100));
@@ -139,13 +250,13 @@ const MyFiles = () => {
         }
       });
 
-      const blob = new Blob([response.data], {
+      const blob = response.data instanceof Blob ? response.data : new Blob([response.data], {
         type: response.headers['content-type'] || 'application/octet-stream'
       });
-      downloadBlob(blob, file.file_name);
+      downloadBlob(blob, responseFileName(response, file.file_name));
       setMessage(`${file.file_name} downloaded successfully.`);
     } catch (downloadError) {
-      setError(downloadError.response?.data?.message || 'Download failed.');
+      setError(await downloadErrorMessage(downloadError, 'Download failed.'));
     } finally {
       setDownloadingFileId(null);
       setDownloadProgress(0);
@@ -174,36 +285,9 @@ const MyFiles = () => {
     setSelectedFile(null);
     setChunks([]);
     setChunksError('');
-    setDownloadingChunkId(null);
     setDownloadingTextChunkId(null);
     setPreviewingChunkId(null);
     setChunkTextPreviews({});
-  };
-
-  const downloadChunk = async (chunk) => {
-    if (!selectedFile) return;
-
-    setDownloadingChunkId(chunk.id);
-    setChunkDownloadProgress(0);
-    setChunksError('');
-
-    try {
-      const response = await api.get(`/download-chunk/${chunk.id}`, {
-        responseType: 'blob',
-        onDownloadProgress: (event) => {
-          if (event.total) {
-            setChunkDownloadProgress(Math.round((event.loaded / event.total) * 100));
-          }
-        }
-      });
-
-      downloadBlob(response.data, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.part`);
-    } catch (downloadError) {
-      setChunksError(downloadError.response?.data?.message || 'Chunk download failed.');
-    } finally {
-      setDownloadingChunkId(null);
-      setChunkDownloadProgress(0);
-    }
   };
 
   const downloadChunkText = async (chunk) => {
@@ -213,13 +297,16 @@ const MyFiles = () => {
     setChunksError('');
 
     try {
-      const response = await api.get(`/download-chunk-text/${chunk.id}`, {
+      const response = await api.get(`/chunks/${chunk.id}/text`, {
         responseType: 'blob'
       });
 
-      downloadBlob(response.data, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.base64.txt`);
+      downloadBlob(
+        response.data,
+        responseFileName(response, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.txt`)
+      );
     } catch (downloadError) {
-      setChunksError(downloadError.response?.data?.message || 'Readable chunk download failed.');
+      setChunksError(await downloadErrorMessage(downloadError, 'Readable chunk download failed.'));
     } finally {
       setDownloadingTextChunkId(null);
     }
@@ -457,7 +544,7 @@ const MyFiles = () => {
                     Stored Chunks
                   </h3>
                   <p className="mt-1 truncate text-sm text-slate-600">
-                    {selectedFile.file_name} - raw chunk parts are not meant to open directly
+                    {selectedFile.file_name} - readable previews are extracted from text files and ZIP source files
                   </p>
                 </div>
                 <button
@@ -507,19 +594,6 @@ const MyFiles = () => {
                           <div className="flex flex-col gap-2">
                             <button
                               type="button"
-                              onClick={() => downloadChunk(chunk)}
-                              disabled={downloadingChunkId === chunk.id}
-                              className="inline-flex items-center justify-center gap-2 rounded-md bg-slate-950 px-3 py-2 text-sm font-bold text-white transition hover:bg-teal-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-                            >
-                              {downloadingChunkId === chunk.id ? (
-                                <FaSpinner className="animate-spin" />
-                              ) : (
-                                <FaDownload />
-                              )}
-                              Raw
-                            </button>
-                            <button
-                              type="button"
                               onClick={() => downloadChunkText(chunk)}
                               disabled={downloadingTextChunkId === chunk.id}
                               className="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
@@ -529,7 +603,7 @@ const MyFiles = () => {
                               ) : (
                                 <FaFileAlt />
                               )}
-                              Text
+                              Download Text
                             </button>
                           </div>
                         </div>
@@ -544,25 +618,27 @@ const MyFiles = () => {
                           ) : (
                             <FaFileAlt />
                           )}
-                          {chunkTextPreviews[chunk.id] ? 'Hide Text' : 'Show Text'}
+                          {chunkTextPreviews[chunk.id] ? 'Hide Preview' : 'Preview Text'}
                         </button>
                         {chunkTextPreviews[chunk.id] && (
                           <div className="mt-3 rounded-md border border-slate-200 bg-white">
                             <div className="flex items-center justify-between border-b border-slate-200 px-3 py-2 text-xs font-bold uppercase text-slate-500">
-                              <span>{chunkTextPreviews[chunk.id].mode} preview</span>
+                              <span>
+                                {chunkTextPreviews[chunk.id].mode === 'zip-text'
+                                  ? 'extracted zip text'
+                                  : 'text preview'}
+                              </span>
                               {chunkTextPreviews[chunk.id].truncated && <span>truncated</span>}
                             </div>
-                            <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-words p-3 text-xs leading-5 text-slate-800">
-                              {chunkTextPreviews[chunk.id].text}
+                            {chunkTextPreviews[chunk.id].sourceFiles?.length > 0 && (
+                              <div className="border-b border-slate-200 px-3 py-2 text-xs text-slate-500">
+                                {chunkTextPreviews[chunk.id].sourceFiles.slice(0, 3).join(', ')}
+                                {chunkTextPreviews[chunk.id].sourceFiles.length > 3 && '...'}
+                              </div>
+                            )}
+                            <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-words bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+                              {highlightedPreview(chunkTextPreviews[chunk.id].text)}
                             </pre>
-                          </div>
-                        )}
-                        {downloadingChunkId === chunk.id && (
-                          <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
-                            <div
-                              className="h-full bg-teal-600 transition-all"
-                              style={{ width: `${chunkDownloadProgress || 8}%` }}
-                            />
                           </div>
                         )}
                       </motion.article>

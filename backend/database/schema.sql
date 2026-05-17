@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS chunks (
   file_id INT NOT NULL,
   chunk_index INT UNSIGNED NOT NULL,
   chunk_path VARCHAR(1024) NOT NULL,
+  storage_bucket VARCHAR(100) NOT NULL DEFAULT 'chunks',
   chunk_size BIGINT UNSIGNED NOT NULL,
   chunk_hash VARCHAR(128) NOT NULL,
   chunk_status VARCHAR(32) NOT NULL DEFAULT 'healthy',

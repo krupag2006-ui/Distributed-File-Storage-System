@@ -1,32 +1,58 @@
 const pool = require('../config/db');
+const { supabasePrimaryBucket } = require('../config/supabase');
 
-const createChunk = async ({ fileId, chunkIndex, chunkPath, chunkSize, chunkHash }) => {
-  const [result] = await pool.execute(
-    `INSERT INTO chunks (file_id, chunk_index, chunk_path, chunk_size, chunk_hash, chunk_status)
-     VALUES (?, ?, ?, ?, ?, 'healthy')
-     ON DUPLICATE KEY UPDATE
-       chunk_path = VALUES(chunk_path),
-       chunk_size = VALUES(chunk_size),
-       chunk_hash = VALUES(chunk_hash),
-       chunk_status = 'healthy'`,
-    [fileId, chunkIndex, chunkPath, chunkSize, chunkHash]
+const getChunkId = async ({ fileId, chunkIndex }) => {
+  const [rows] = await pool.execute(
+    'SELECT id FROM chunks WHERE file_id = ? AND chunk_index = ?',
+    [fileId, chunkIndex]
   );
 
-  return result.insertId;
+  return rows[0]?.id;
 };
 
-const createOrUpdateChunk = async ({ fileId, chunkIndex, chunkPath, chunkSize, chunkHash }) => {
+const createChunk = async ({
+  fileId,
+  chunkIndex,
+  chunkPath,
+  chunkSize,
+  chunkHash,
+  storageBucket = supabasePrimaryBucket
+}) => {
   const [result] = await pool.execute(
-    `INSERT INTO chunks (file_id, chunk_index, chunk_path, chunk_size, chunk_hash, chunk_status)
-     VALUES (?, ?, ?, ?, ?, 'healthy')
+    `INSERT INTO chunks (file_id, chunk_index, chunk_path, storage_bucket, chunk_size, chunk_hash, chunk_status)
+     VALUES (?, ?, ?, ?, ?, ?, 'healthy')
      ON DUPLICATE KEY UPDATE
        chunk_path = VALUES(chunk_path),
+       storage_bucket = VALUES(storage_bucket),
        chunk_size = VALUES(chunk_size),
        chunk_hash = VALUES(chunk_hash),
        chunk_status = 'healthy'`,
-    [fileId, chunkIndex, chunkPath, chunkSize, chunkHash]
+    [fileId, chunkIndex, chunkPath, storageBucket, chunkSize, chunkHash]
   );
-  return result.insertId;
+
+  return result.insertId || getChunkId({ fileId, chunkIndex });
+};
+
+const createOrUpdateChunk = async ({
+  fileId,
+  chunkIndex,
+  chunkPath,
+  chunkSize,
+  chunkHash,
+  storageBucket = supabasePrimaryBucket
+}) => {
+  const [result] = await pool.execute(
+    `INSERT INTO chunks (file_id, chunk_index, chunk_path, storage_bucket, chunk_size, chunk_hash, chunk_status)
+     VALUES (?, ?, ?, ?, ?, ?, 'healthy')
+     ON DUPLICATE KEY UPDATE
+       chunk_path = VALUES(chunk_path),
+       storage_bucket = VALUES(storage_bucket),
+       chunk_size = VALUES(chunk_size),
+       chunk_hash = VALUES(chunk_hash),
+       chunk_status = 'healthy'`,
+    [fileId, chunkIndex, chunkPath, storageBucket, chunkSize, chunkHash]
+  );
+  return result.insertId || getChunkId({ fileId, chunkIndex });
 };
 
 const createChunks = async (chunks) => {
@@ -36,15 +62,17 @@ const createChunks = async (chunks) => {
     chunk.fileId,
     chunk.chunkIndex,
     chunk.chunkPath,
+    chunk.storageBucket || supabasePrimaryBucket,
     chunk.chunkSize,
     chunk.chunkHash
   ]);
 
   const [result] = await pool.query(
-    `INSERT INTO chunks (file_id, chunk_index, chunk_path, chunk_size, chunk_hash, chunk_status)
+    `INSERT INTO chunks (file_id, chunk_index, chunk_path, storage_bucket, chunk_size, chunk_hash, chunk_status)
      VALUES ?
      ON DUPLICATE KEY UPDATE
        chunk_path = VALUES(chunk_path),
+       storage_bucket = VALUES(storage_bucket),
        chunk_size = VALUES(chunk_size),
        chunk_hash = VALUES(chunk_hash),
        chunk_status = 'healthy'`,
@@ -56,7 +84,7 @@ const createChunks = async (chunks) => {
 
 const getChunksByFile = async (fileId) => {
   const [rows] = await pool.execute(
-    `SELECT id, file_id, chunk_index, chunk_path, chunk_size, chunk_hash, chunk_status
+    `SELECT id, file_id, chunk_index, chunk_path, storage_bucket, chunk_size, chunk_hash, chunk_status
      FROM chunks
      WHERE file_id = ?
      ORDER BY chunk_index ASC`,
@@ -72,6 +100,7 @@ const getChunkByIdForUser = async (chunkId, userId) => {
        chunks.file_id,
        chunks.chunk_index,
        chunks.chunk_path,
+       chunks.storage_bucket,
        chunks.chunk_size,
        chunks.chunk_hash,
        chunks.chunk_status,
