@@ -332,7 +332,7 @@ const MyFiles = () => {
         [chunk.id]: response.data
       }));
     } catch (previewError) {
-      setChunksError(previewError.response?.data?.message || 'Unable to load chunk text.');
+      setChunksError(await downloadErrorMessage(previewError, 'Unable to load chunk text.'));
     } finally {
       setPreviewingChunkId(null);
     }

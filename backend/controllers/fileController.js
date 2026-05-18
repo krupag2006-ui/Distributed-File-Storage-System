@@ -160,10 +160,11 @@ const getMergedFileBufferForChunk = async (chunk, userId) => {
 const getReadableChunkText = async ({ chunk, userId, maxChars }) => {
   const metadata = await getFileMetadataByFileId(chunk.file_id);
   const contentType = metadata?.content_type || '';
-  const { chunkBuffer } = await getChunkBuffer(chunk);
-  const archiveBuffer = isZipArchive({ contentType, fileName: chunk.file_name })
-    ? await getMergedFileBufferForChunk(chunk, userId)
-    : null;
+  const isArchive = isZipArchive({ contentType, fileName: chunk.file_name });
+  const archiveBuffer = isArchive ? await getMergedFileBufferForChunk(chunk, userId) : null;
+  const { chunkBuffer } = archiveBuffer
+    ? { chunkBuffer: archiveBuffer }
+    : await getChunkBuffer(chunk);
 
   return {
     contentType,
