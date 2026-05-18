@@ -44,6 +44,35 @@ const truncateText = (text, maxChars) => ({
   truncated: text.length > maxChars
 });
 
+const chunkTextWindow = ({ text, sourceRanges, chunkIndex, chunkCount }) => {
+  const count = Number(chunkCount);
+  const index = Number(chunkIndex);
+
+  if (!Number.isInteger(count) || count <= 1 || !Number.isInteger(index)) {
+    return {
+      text,
+      sourceFiles: sourceRanges.map((source) => source.fileName),
+      partial: false
+    };
+  }
+
+  const zeroBasedIndex = Math.max(0, Math.min(count - 1, index > 0 ? index - 1 : index));
+  const start = Math.floor((text.length * zeroBasedIndex) / count);
+  const end = zeroBasedIndex === count - 1
+    ? text.length
+    : Math.floor((text.length * (zeroBasedIndex + 1)) / count);
+  const windowText = text.slice(start, end).trim();
+  const sourceFiles = sourceRanges
+    .filter((source) => source.end > start && source.start < end)
+    .map((source) => source.fileName);
+
+  return {
+    text: windowText,
+    sourceFiles,
+    partial: start > 0 || end < text.length
+  };
+};
+
 const isTextLike = ({ contentType = '', fileName = '' }) => {
   const normalizedType = contentType.toLowerCase();
   return normalizedType.startsWith('text/') || READABLE_EXTENSIONS.has(extensionOf(fileName));
@@ -72,7 +101,7 @@ const readableZipEntries = (zip) =>
     .filter((entry) => !entry.isDirectory && READABLE_EXTENSIONS.has(extensionOf(entry.entryName)))
     .sort((first, second) => first.entryName.localeCompare(second.entryName));
 
-const extractZipReadableText = ({ buffer, maxChars }) => {
+const extractZipReadableText = ({ buffer, maxChars, chunkIndex, chunkCount }) => {
   let zip;
 
   try {
@@ -83,7 +112,7 @@ const extractZipReadableText = ({ buffer, maxChars }) => {
 
   const entries = readableZipEntries(zip);
   const sections = [];
-  const sourceFiles = [];
+  const sourceRanges = [];
   let totalLength = 0;
 
   for (const entry of entries) {
@@ -100,13 +129,15 @@ const extractZipReadableText = ({ buffer, maxChars }) => {
     }
 
     const section = [`// ${entry.entryName}`, content].join('\n');
+    const sectionStart = totalLength;
+    const sectionEnd = sectionStart + section.length;
     sections.push(section);
-    sourceFiles.push(entry.entryName);
+    sourceRanges.push({
+      fileName: entry.entryName,
+      start: sectionStart,
+      end: sectionEnd
+    });
     totalLength += section.length + 2;
-
-    if (totalLength >= maxChars) {
-      break;
-    }
   }
 
   if (!sections.length) {
@@ -114,14 +145,25 @@ const extractZipReadableText = ({ buffer, maxChars }) => {
   }
 
   const combinedText = sections.join('\n\n');
-  const truncated = truncateText(combinedText, maxChars);
+  const window = chunkTextWindow({
+    text: combinedText,
+    sourceRanges,
+    chunkIndex,
+    chunkCount
+  });
+
+  if (!window.text) {
+    return emptyPreview();
+  }
+
+  const truncated = truncateText(window.text, maxChars);
 
   return {
     mode: 'zip-text',
-    language: sourceFiles.length === 1 ? languageOf(sourceFiles[0]) : 'text',
-    sourceFiles,
+    language: window.sourceFiles.length === 1 ? languageOf(window.sourceFiles[0]) : 'text',
+    sourceFiles: window.sourceFiles,
     text: truncated.text,
-    truncated: truncated.truncated || sourceFiles.length < entries.length
+    truncated: truncated.truncated || window.partial
   };
 };
 
@@ -130,6 +172,8 @@ const buildTextPreview = ({
   archiveBuffer,
   contentType = '',
   fileName = '',
+  chunkIndex,
+  chunkCount,
   maxChars = 12000
 }) => {
   if (isTextLike({ contentType, fileName })) {
@@ -150,6 +194,8 @@ const buildTextPreview = ({
   if (isZipArchive({ contentType, fileName })) {
     return extractZipReadableText({
       buffer: archiveBuffer || buffer,
+      chunkIndex,
+      chunkCount,
       maxChars
     });
   }

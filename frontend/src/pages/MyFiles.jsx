@@ -191,7 +191,7 @@ const MyFiles = () => {
   const [chunks, setChunks] = useState([]);
   const [chunksLoading, setChunksLoading] = useState(false);
   const [chunksError, setChunksError] = useState('');
-  const [downloadingTextChunkId, setDownloadingTextChunkId] = useState(null);
+  const [downloadingChunkId, setDownloadingChunkId] = useState(null);
   const [previewingChunkId, setPreviewingChunkId] = useState(null);
   const [chunkTextPreviews, setChunkTextPreviews] = useState({});
   const [downloadProgress, setDownloadProgress] = useState(0);
@@ -285,30 +285,30 @@ const MyFiles = () => {
     setSelectedFile(null);
     setChunks([]);
     setChunksError('');
-    setDownloadingTextChunkId(null);
+    setDownloadingChunkId(null);
     setPreviewingChunkId(null);
     setChunkTextPreviews({});
   };
 
-  const downloadChunkText = async (chunk) => {
+  const downloadChunk = async (chunk) => {
     if (!selectedFile) return;
 
-    setDownloadingTextChunkId(chunk.id);
+    setDownloadingChunkId(chunk.id);
     setChunksError('');
 
     try {
-      const response = await api.get(`/chunks/${chunk.id}/text`, {
+      const response = await api.get(`/chunks/${chunk.id}/download`, {
         responseType: 'blob'
       });
 
       downloadBlob(
         response.data,
-        responseFileName(response, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.txt`)
+        responseFileName(response, `${selectedFile.file_name}.chunk_${chunk.chunk_index}.part`)
       );
     } catch (downloadError) {
-      setChunksError(await downloadErrorMessage(downloadError, 'Readable chunk download failed.'));
+      setChunksError(await downloadErrorMessage(downloadError, 'Chunk download failed.'));
     } finally {
-      setDownloadingTextChunkId(null);
+      setDownloadingChunkId(null);
     }
   };
 
@@ -594,16 +594,16 @@ const MyFiles = () => {
                           <div className="flex flex-col gap-2">
                             <button
                               type="button"
-                              onClick={() => downloadChunkText(chunk)}
-                              disabled={downloadingTextChunkId === chunk.id}
+                              onClick={() => downloadChunk(chunk)}
+                              disabled={downloadingChunkId === chunk.id}
                               className="inline-flex items-center justify-center gap-2 rounded-md bg-indigo-700 px-3 py-2 text-sm font-bold text-white transition hover:bg-indigo-800 disabled:cursor-not-allowed disabled:bg-slate-400"
                             >
-                              {downloadingTextChunkId === chunk.id ? (
+                              {downloadingChunkId === chunk.id ? (
                                 <FaSpinner className="animate-spin" />
                               ) : (
-                                <FaFileAlt />
+                                <FaDownload />
                               )}
-                              Download Text
+                              Download Chunk
                             </button>
                           </div>
                         </div>

@@ -105,6 +105,7 @@ const getChunkByIdForUser = async (chunkId, userId) => {
        chunks.chunk_hash,
        chunks.chunk_status,
        files.file_name,
+       files.chunk_count,
        files.user_id
      FROM chunks
      INNER JOIN files ON files.id = chunks.file_id

@@ -172,6 +172,8 @@ const getReadableChunkText = async ({ chunk, userId, maxChars }) => {
       archiveBuffer,
       contentType,
       fileName: chunk.file_name,
+      chunkIndex: chunk.chunk_index,
+      chunkCount: chunk.chunk_count,
       maxChars
     })
   };
@@ -311,6 +313,34 @@ const downloadChunkText = async (req, res, next) => {
     res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
 
     return res.send(preview.text);
+  } catch (error) {
+    next(error);
+  }
+};
+
+const downloadChunk = async (req, res, next) => {
+  try {
+    const chunkId = toNumber(req.params.chunkId);
+
+    if (!Number.isInteger(chunkId)) {
+      return res.status(400).json({ message: 'A valid chunk id is required.' });
+    }
+
+    const chunk = await getChunkByIdForUser(chunkId, req.user.id);
+
+    if (!chunk) {
+      return res.status(404).json({ message: 'Chunk not found.' });
+    }
+
+    const { chunkBuffer } = await getChunkBuffer(chunk);
+    const fileName = `${sanitizeBaseName(chunk.file_name)}_chunk_${chunk.chunk_index}.part`;
+
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Content-Length', String(chunkBuffer.length));
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+
+    return res.end(chunkBuffer);
   } catch (error) {
     next(error);
   }
@@ -459,6 +489,7 @@ const analytics = async (req, res, next) => {
 module.exports = {
   uploadFile,
   getChunks,
+  downloadChunk,
   downloadChunkText,
   getChunkTextPreview,
   listFiles,
