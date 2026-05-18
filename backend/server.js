@@ -15,29 +15,10 @@ const pool = require('./config/db');
 
 const app = express();
 const port = process.env.PORT || 5000;
-const allowedOrigins = new Set([
-  'http://localhost:5173',
-  'https://distributed-file-storage-system.vercel.app',
-  'https://distributed-file-storage-system-d1b8muvbl-charishmap3s-projects.vercel.app',
-  'https://distributed-file-storage-system-qw4p8on4h.vercel.app'
-]);
-const allowedOriginPatterns = [
-  /^https:\/\/distributed-file-storage-system-[a-z0-9-]+\.vercel\.app$/i
-];
 
 app.use(
   cors({
-    origin(origin, callback) {
-      if (
-        !origin ||
-        allowedOrigins.has(origin) ||
-        allowedOriginPatterns.some((pattern) => pattern.test(origin))
-      ) {
-        return callback(null, true);
-      }
-
-      return callback(null, false);
-    },
+    origin: true,
     credentials: true,
     exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type']
   })
