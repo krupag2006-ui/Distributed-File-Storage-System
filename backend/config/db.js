@@ -3,6 +3,13 @@ const path = require('path');
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
+const requiredDatabaseEnv = ['DB_HOST', 'DB_USER', 'DB_NAME'];
+const missingDatabaseEnv = requiredDatabaseEnv.filter((key) => !process.env[key]);
+
+if (process.env.NODE_ENV === 'production' && missingDatabaseEnv.length) {
+  throw new Error(`Missing required database environment variables: ${missingDatabaseEnv.join(', ')}`);
+}
+
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),
