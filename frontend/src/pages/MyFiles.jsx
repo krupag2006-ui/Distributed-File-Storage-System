@@ -326,7 +326,7 @@ const MyFiles = () => {
     setChunksError('');
 
     try {
-      const response = await api.get(`/chunk-text/${chunk.id}`);
+      const response = await api.get(`/files/chunk-text/${chunk.id}`);
       setChunkTextPreviews((current) => ({
         ...current,
         [chunk.id]: response.data
