@@ -10,8 +10,6 @@ const downloadRoutes = require('./routes/downloadRoutes');
 const fileRoutes = require('./routes/fileRoutes');
 const replicaRoutes = require('./routes/replicaRoutes');
 const shareRoutes = require('./routes/shareRoutes');
-const { ensureLocalChunkSchema, ensureExtendedSchema } = require('./database/migrateSchema');
-const pool = require('./config/db');
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -36,9 +34,6 @@ app.get('/', (req, res) => {
 
 app.get('/health', async (req, res) => {
   try {
-    // Check database connection
-    await pool.execute('SELECT 1');
-    
     // Check Supabase connection
     const { supabase } = require('./config/supabase');
     if (supabase) {
@@ -47,7 +42,6 @@ app.get('/health', async (req, res) => {
         return res.status(503).json({ 
           status: 'degraded', 
           service: 'distributed-file-storage-api',
-          database: 'ok',
           storage: 'error',
           error: error.message
         });
@@ -57,7 +51,6 @@ app.get('/health', async (req, res) => {
     res.json({ 
       status: 'ok', 
       service: 'distributed-file-storage-api',
-      database: 'ok',
       storage: 'ok'
     });
   } catch (error) {
@@ -99,9 +92,6 @@ mongoose.connect(process.env.MONGO_URI)
 .catch((err) => console.log(err));
 const startServer = async () => {
   try {
-    await ensureLocalChunkSchema();
-    await ensureExtendedSchema();
-
     app.listen(port, '0.0.0.0', () => {
       console.log(`Server running on port ${port}`);
     });
