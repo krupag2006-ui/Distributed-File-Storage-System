@@ -1,7 +1,12 @@
 const path = require('path');
 const { chunkFile, DEFAULT_CHUNK_SIZE } = require('../utils/chunkFile');
 const mergeChunks = require('../utils/mergeChunks');
-const { deleteChunksFromCloud, downloadChunkFromCloud } = require('../utils/supabaseStorage');
+const {
+  buildChunkPath,
+  deleteChunksFromCloud,
+  downloadChunkFromCloud,
+  uploadChunkToCloud
+} = require('../utils/supabaseStorage');
 const { calculateSha256 } = require('../utils/fileHash');
 const { buildTextPreview, isZipArchive } = require('../utils/textPreview');
 const { supabasePrimaryBucket } = require('../config/supabase');
@@ -319,6 +324,143 @@ const downloadChunkText = async (req, res, next) => {
   }
 };
 
+const startChunkedUpload = async (req, res, next) => {
+  try {
+    const fileName = sanitizeName(req.body.fileName || '');
+    const fileSize = Number(req.body.fileSize);
+    const chunkCount = Number(req.body.chunkCount);
+
+    if (!fileName) {
+      return res.status(400).json({ message: 'File name is required.' });
+    }
+
+    if (!Number.isInteger(fileSize) || fileSize <= 0) {
+      return res.status(400).json({ message: 'A valid file size is required.' });
+    }
+
+    if (!Number.isInteger(chunkCount) || chunkCount <= 0) {
+      return res.status(400).json({ message: 'A valid chunk count is required.' });
+    }
+
+    const fileId = await createFile({
+      userId: req.user.id,
+      fileName,
+      fileSize,
+      chunkCount
+    });
+
+    const file = await getFileByIdForUser(fileId, req.user.id);
+    return res.status(201).json({ file, chunkSize: DEFAULT_CHUNK_SIZE });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const uploadFileChunk = async (req, res, next) => {
+  try {
+    const fileId = toNumber(req.params.fileId);
+    const chunkIndex = toNumber(req.body.chunkIndex);
+
+    if (!Number.isInteger(fileId)) {
+      return res.status(400).json({ message: 'A valid file id is required.' });
+    }
+
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 1) {
+      return res.status(400).json({ message: 'A valid chunk index is required.' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ message: 'Chunk file is required.' });
+    }
+
+    const file = await getFileByIdForUser(fileId, req.user.id);
+
+    if (!file) {
+      return res.status(404).json({ message: 'File not found.' });
+    }
+
+    if (chunkIndex > file.chunk_count) {
+      return res.status(400).json({ message: 'Chunk index exceeds the expected chunk count.' });
+    }
+
+    const chunkName = buildChunkPath(file.id, chunkIndex);
+    const chunkHash = calculateSha256(req.file.buffer);
+    const { primaryPath, replicaPaths } = await uploadChunkToCloud(req.file.buffer, chunkName);
+    const chunkId = await createChunk({
+      fileId: file.id,
+      chunkIndex,
+      chunkPath: primaryPath,
+      storageBucket: supabasePrimaryBucket,
+      chunkSize: req.file.size,
+      chunkHash
+    });
+
+    if (replicaPaths?.length) {
+      await createReplicas(
+        replicaPaths.map((replica) => ({
+          chunkId,
+          bucket: replica.bucket,
+          replicaPath: replica.path,
+          replicaStatus: 'active'
+        }))
+      );
+    }
+
+    return res.status(201).json({
+      chunk: formatChunk({
+        id: chunkId,
+        file_id: file.id,
+        chunk_index: chunkIndex,
+        chunk_path: primaryPath,
+        storage_bucket: supabasePrimaryBucket,
+        chunk_size: req.file.size,
+        chunk_hash: chunkHash,
+        chunk_status: 'healthy'
+      })
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+const completeChunkedUpload = async (req, res, next) => {
+  try {
+    const fileId = toNumber(req.params.fileId);
+
+    if (!Number.isInteger(fileId)) {
+      return res.status(400).json({ message: 'A valid file id is required.' });
+    }
+
+    const file = await getFileByIdForUser(fileId, req.user.id);
+
+    if (!file) {
+      return res.status(404).json({ message: 'File not found.' });
+    }
+
+    const chunks = await getChunksByFile(file.id);
+    const validationError = validateFileChunks(file, chunks);
+
+    if (validationError) {
+      return res.status(409).json({ message: validationError });
+    }
+
+    const fileMetadata = await createFileMetadata({
+      fileId: file.id,
+      contentType: req.body.contentType || 'application/octet-stream',
+      checksum: req.body.checksum || ''
+    });
+
+    return res.json({
+      message: 'File uploaded, split into chunks, and saved successfully.',
+      file,
+      metadata: fileMetadata,
+      chunks: chunks.map(formatChunk)
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const downloadChunk = async (req, res, next) => {
   try {
     const chunkId = toNumber(req.params.chunkId);
@@ -489,6 +631,9 @@ const analytics = async (req, res, next) => {
 
 module.exports = {
   uploadFile,
+  startChunkedUpload,
+  uploadFileChunk,
+  completeChunkedUpload,
   getChunks,
   downloadChunk,
   downloadChunkText,

@@ -13,6 +13,8 @@ import api from '../services/api';
 
 const previewChunkSize = 10 * 1024 * 1024;
 
+const uploadChunkSize = 10 * 1024 * 1024;
+
 const formatBytes = (bytes) => {
   const size = Number(bytes);
   if (!size) return '0 B';
@@ -43,6 +45,27 @@ const chunkVariants = {
       damping: 18
     }
   })
+};
+
+const hashFile = async (file) => {
+  const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+};
+
+const getUploadErrorMessage = (error) => {
+  if (error.response?.data?.message) return error.response.data.message;
+
+  if (error.code === 'ERR_NETWORK') {
+    return 'Upload failed before the server returned a response. Check the deployed API URL and backend logs.';
+  }
+
+  if (error.code === 'ECONNABORTED') {
+    return 'Upload timed out. Please try again.';
+  }
+
+  return error.message || 'Upload failed. Please try again.';
 };
 
 const FileUpload = () => {
@@ -99,27 +122,61 @@ const FileUpload = () => {
     setProgress(0);
     setUploadedChunks([]);
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
+    const chunkCount = Math.ceil(selectedFile.size / uploadChunkSize);
+    let createdFileId = null;
 
     try {
-      const response = await api.post('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (event) => {
-          const percent = event.total ? Math.round((event.loaded / event.total) * 100) : 100;
-          setProgress(Math.min(100, percent));
-        }
+      const startResponse = await api.post('/files/upload/start', {
+        fileName: selectedFile.name,
+        fileSize: selectedFile.size,
+        chunkCount
+      });
+      createdFileId = startResponse.data.file.id;
+
+      const completedChunks = [];
+
+      for (let index = 0; index < chunkCount; index += 1) {
+        const chunkStart = index * uploadChunkSize;
+        const chunkEnd = Math.min(selectedFile.size, chunkStart + uploadChunkSize);
+        const chunk = selectedFile.slice(chunkStart, chunkEnd);
+        const formData = new FormData();
+
+        formData.append('chunk', chunk, selectedFile.name);
+        formData.append('chunkIndex', String(index + 1));
+
+        const chunkResponse = await api.post(`/files/upload/${createdFileId}/chunk`, formData, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+          onUploadProgress: (event) => {
+            const chunkLoaded = event.loaded || 0;
+            const percent = Math.round(((chunkStart + chunkLoaded) / selectedFile.size) * 100);
+            setProgress(Math.min(99, percent));
+          }
+        });
+
+        completedChunks.push(chunkResponse.data.chunk);
+        setUploadedChunks([...completedChunks]);
+        setProgress(Math.min(99, Math.round((chunkEnd / selectedFile.size) * 100)));
+      }
+
+      const checksum = crypto.subtle ? await hashFile(selectedFile) : '';
+      const response = await api.post(`/files/upload/${createdFileId}/complete`, {
+        contentType: selectedFile.type || 'application/octet-stream',
+        checksum
       });
 
       setProgress(100);
-      setUploadedChunks(response.data.chunks || []);
+      setUploadedChunks(response.data.chunks || completedChunks);
       setMessage('Upload complete. Opening My Files...');
 
       window.setTimeout(() => {
         navigate('/files');
       }, 900);
     } catch (uploadError) {
-      setError(uploadError.response?.data?.message || 'Upload failed. Please try again.');
+      if (createdFileId) {
+        api.delete(`/files/${createdFileId}`).catch(() => {});
+      }
+
+      setError(getUploadErrorMessage(uploadError));
     } finally {
       setIsUploading(false);
     }
