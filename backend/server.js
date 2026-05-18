@@ -30,6 +30,10 @@ app.use(
 app.use(express.json({ limit: '1mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+app.get('/', (req, res) => {
+  res.send('Backend API Running Successfully');
+});
+
 app.get('/health', async (req, res) => {
   try {
     // Check database connection
@@ -89,7 +93,10 @@ app.use((error, req, res, next) => {
     message: error.message || 'Something went wrong on the server.'
   });
 });
-
+const mongoose = require('mongoose');
+mongoose.connect(process.env.MONGO_URI)
+.then(() => console.log("MongoDB Connected"))
+.catch((err) => console.log(err));
 const startServer = async () => {
   try {
     await ensureLocalChunkSchema();
