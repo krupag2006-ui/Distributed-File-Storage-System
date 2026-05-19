@@ -115,6 +115,12 @@ npm run dev
 
 Frontend URL: `http://localhost:5173`
 
+## Render Deployment
+
+This repository includes a root-level `render.yaml` for deploying the backend as a Render Web Service and the frontend as a Render Static Site.
+
+See `RENDER_DEPLOYMENT.md` for the full clean-deploy checklist and required environment variables.
+
 ## Upload And Download Flow
 
 1. React sends the selected file to `POST /api/files/upload`.

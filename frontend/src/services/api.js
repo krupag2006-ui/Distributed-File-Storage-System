@@ -1,7 +1,18 @@
 import axios from 'axios';
 
+const normalizeApiBaseURL = (value) => {
+  if (!value) {
+    return import.meta.env.DEV ? 'http://localhost:5000/api' : '/api';
+  }
+
+  const baseURL = value.replace(/\/+$/, '');
+  return baseURL.endsWith('/api') ? baseURL : `${baseURL}/api`;
+};
+
+const apiBaseURL = normalizeApiBaseURL(import.meta.env.VITE_API_URL);
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'https://distributed-file-storage-system-hun8.onrender.com/api'
+  baseURL: apiBaseURL
 });
 
 api.interceptors.request.use((config) => {

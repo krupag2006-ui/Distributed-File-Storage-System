@@ -1,0 +1,64 @@
+services:
+  - type: web
+    runtime: node
+    name: distributed-file-storage-api
+    rootDir: backend
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CLIENT_URL
+        fromService:
+          type: web
+          name: distributed-file-storage-web
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      - key: MAX_UPLOAD_SIZE_BYTES
+        value: 536870912
+      - key: CHUNK_SIZE_BYTES
+        value: 10485760
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: chunks
+      - key: SUPABASE_PRIMARY_BUCKET
+        value: chunks
+      - key: SUPABASE_REPLICA_BUCKETS
+        value: chunks_backup
+
+  - type: web
+    runtime: static
+    name: distributed-file-storage-web
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: distributed-file-storage-api
+          envVarKey: RENDER_EXTERNAL_URL
