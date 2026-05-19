@@ -11,9 +11,11 @@ import {
 } from 'react-icons/fa';
 import api from '../services/api';
 
-const previewChunkSize = 10 * 1024 * 1024;
+const chunkSizeBytes = Number(import.meta.env.VITE_CHUNK_SIZE_BYTES || 5 * 1024 * 1024);
 
-const uploadChunkSize = 10 * 1024 * 1024;
+const previewChunkSize = chunkSizeBytes;
+
+const uploadChunkSize = chunkSizeBytes;
 
 const formatBytes = (bytes) => {
   const size = Number(bytes);

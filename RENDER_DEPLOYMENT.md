@@ -68,3 +68,15 @@ CLIENT_URL=https://your-frontend-site.onrender.com
 ```
 
 For multiple allowed frontend origins, use a comma-separated value.
+
+## Free Plan Memory Note
+
+The backend service is configured with:
+
+```text
+MAX_UPLOAD_SIZE_BYTES=20971520
+CHUNK_SIZE_BYTES=5242880
+VITE_CHUNK_SIZE_BYTES=5242880
+```
+
+This keeps each multipart request below 20 MB while the frontend uploads files as 5 MB chunks. Avoid raising `MAX_UPLOAD_SIZE_BYTES` to hundreds of megabytes on Render's free plan, because the backend uses in-memory multipart parsing and the instance can exceed its memory limit.
