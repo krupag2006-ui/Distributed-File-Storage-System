@@ -35,6 +35,8 @@ services:
         value: 20971520
       - key: CHUNK_SIZE_BYTES
         value: 5242880
+      - key: MAX_TEXT_PREVIEW_CHUNK_BYTES
+        value: 1048576
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_SERVICE_ROLE_KEY

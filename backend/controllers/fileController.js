@@ -34,6 +34,7 @@ const sanitizeBaseName = (name) => {
 };
 
 const toNumber = (value) => Number.parseInt(value, 10);
+const maxTextPreviewChunkBytes = Number(process.env.MAX_TEXT_PREVIEW_CHUNK_BYTES || 1024 * 1024);
 
 const formatAnalytics = (analytics) => ({
   totalFiles: Number(analytics.total_files || 0),
@@ -475,6 +476,12 @@ const downloadChunk = async (req, res, next) => {
       return res.status(404).json({ message: 'Chunk not found.' });
     }
 
+    if (Number(chunk.chunk_size) > maxTextPreviewChunkBytes) {
+      return res.status(413).json({
+        message: 'This chunk is too large for text preview. Download the chunk instead.'
+      });
+    }
+
     const { chunkBuffer } = await getChunkBuffer(chunk);
     const fileName = `${sanitizeBaseName(chunk.file_name)}_chunk_${chunk.chunk_index}.part`;
 
@@ -501,6 +508,18 @@ const getChunkTextPreview = async (req, res, next) => {
 
     if (!chunk) {
       return res.status(404).json({ message: 'Chunk not found.' });
+    }
+
+    if (Number(chunk.chunk_size) > maxTextPreviewChunkBytes) {
+      return res.json({
+        chunk: formatChunk(chunk),
+        contentType: 'text/plain',
+        mode: 'large-chunk',
+        language: 'text',
+        sourceFiles: [],
+        text: 'This chunk is too large for inline preview on the current deployment. Use Download Chunk to open it locally.',
+        truncated: false
+      });
     }
 
     const { contentType, preview } = await getReadableChunkText({
