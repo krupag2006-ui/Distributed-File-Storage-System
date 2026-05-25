@@ -53,7 +53,7 @@ const canAccessShare = async (share, user) => {
 
 const createShareLink = async (req, res, next) => {
   try {
-    const { fileId, accessType = 'download', expiryDate, isPublic = false } = req.body;
+    const { fileId, accessType = 'download', expiryDate, isPublic = true } = req.body;
     const parsedFileId = toNumber(fileId);
 
     if (!Number.isInteger(parsedFileId)) {

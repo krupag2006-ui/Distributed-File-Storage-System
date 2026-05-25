@@ -128,6 +128,7 @@ const getChunkBuffer = async (chunk) => {
     bucket: chunk.storage_bucket,
     chunkIndex: chunk.chunk_index,
     fileId: chunk.file_id,
+    fileName: chunk.file_name,
     replicaSources
   });
   const actualHash = calculateSha256(chunkBuffer);
@@ -212,6 +213,7 @@ const uploadFile = async (req, res, next) => {
 
     const savedChunks = await chunkFile({
       fileId: createdFileId,
+      fileName,
       fileBuffer: req.file.buffer
     });
 
@@ -384,7 +386,7 @@ const uploadFileChunk = async (req, res, next) => {
       return res.status(400).json({ message: 'Chunk index exceeds the expected chunk count.' });
     }
 
-    const chunkName = buildChunkPath(file.id, chunkIndex);
+    const chunkName = buildChunkPath(file.id, chunkIndex, file.file_name);
     const chunkHash = calculateSha256(req.file.buffer);
     const { primaryPath, replicaPaths } = await uploadChunkToCloud(req.file.buffer, chunkName);
     const chunkId = await createChunk({

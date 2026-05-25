@@ -12,9 +12,7 @@ import {
 import api from '../services/api';
 
 const chunkSizeBytes = Number(import.meta.env.VITE_CHUNK_SIZE_BYTES || 5 * 1024 * 1024);
-
 const previewChunkSize = chunkSizeBytes;
-
 const uploadChunkSize = chunkSizeBytes;
 
 const formatBytes = (bytes) => {
@@ -73,6 +71,7 @@ const getUploadErrorMessage = (error) => {
 const FileUpload = () => {
   const navigate = useNavigate();
   const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadFileName, setUploadFileName] = useState('');
   const [uploadedChunks, setUploadedChunks] = useState([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
@@ -98,6 +97,7 @@ const FileUpload = () => {
 
   const chooseFile = (file) => {
     setSelectedFile(file);
+    setUploadFileName(file.name);
     setUploadedChunks([]);
     setProgress(0);
     setMessage('');
@@ -118,6 +118,13 @@ const FileUpload = () => {
       return;
     }
 
+    const normalizedFileName = uploadFileName.trim();
+
+    if (!normalizedFileName) {
+      setError('Please enter a file name.');
+      return;
+    }
+
     setIsUploading(true);
     setError('');
     setMessage('');
@@ -129,7 +136,7 @@ const FileUpload = () => {
 
     try {
       const startResponse = await api.post('/files/upload/start', {
-        fileName: selectedFile.name,
+        fileName: normalizedFileName,
         fileSize: selectedFile.size,
         chunkCount
       });
@@ -143,7 +150,7 @@ const FileUpload = () => {
         const chunk = selectedFile.slice(chunkStart, chunkEnd);
         const formData = new FormData();
 
-        formData.append('chunk', chunk, selectedFile.name);
+        formData.append('chunk', chunk, normalizedFileName);
         formData.append('chunkIndex', String(index + 1));
 
         const chunkResponse = await api.post(`/files/upload/${createdFileId}/chunk`, formData, {
@@ -242,6 +249,17 @@ const FileUpload = () => {
                 <p className="text-sm text-slate-600">{formatBytes(selectedFile.size)}</p>
               </div>
             </motion.div>
+
+            <label className="min-w-0 flex-1 lg:max-w-md">
+              <span className="text-sm font-semibold text-slate-700">Stored file name</span>
+              <input
+                type="text"
+                value={uploadFileName}
+                onChange={(event) => setUploadFileName(event.target.value)}
+                disabled={isUploading}
+                className="mt-2 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-teal-500 disabled:bg-slate-100"
+              />
+            </label>
 
             <button
               type="button"

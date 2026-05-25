@@ -62,7 +62,30 @@ const chunkPathIndex = (chunkIndex) => {
   return numericIndex > 0 ? numericIndex - 1 : numericIndex;
 };
 
-const buildChunkPath = (fileId, chunkIndex) => `uploads/${fileId}/chunk_${chunkPathIndex(chunkIndex)}`;
+const sanitizePathSegment = (value, fallback = 'file') => {
+  const cleanedValue = String(value || '')
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 120);
+
+  return cleanedValue || fallback;
+};
+
+const buildFileFolderName = (fileId, fileName) => {
+  const safeFileId = sanitizePathSegment(fileId, 'file');
+
+  if (!fileName) {
+    return safeFileId;
+  }
+
+  const safeFileName = sanitizePathSegment(fileName, 'file');
+  return `${safeFileId}-${safeFileName}`;
+};
+
+const buildChunkPath = (fileId, chunkIndex, fileName) =>
+  `uploads/${buildFileFolderName(fileId, fileName)}/chunk_${chunkPathIndex(chunkIndex)}`;
 
 const buildLegacyChunkPath = (fileId, chunkIndex) => `files/${fileId}/file${fileId}_chunk_${chunkIndex}`;
 
@@ -72,6 +95,7 @@ const buildStoragePathCandidates = (chunkPath, options = {}) => {
   const candidates = [normalizedPath, rawPath];
 
   if (options.fileId !== undefined && options.chunkIndex !== undefined) {
+    candidates.push(buildChunkPath(options.fileId, options.chunkIndex, options.fileName));
     candidates.push(buildChunkPath(options.fileId, options.chunkIndex));
     candidates.push(`uploads/${options.fileId}/chunk_${options.chunkIndex}`);
     candidates.push(buildLegacyChunkPath(options.fileId, options.chunkIndex));

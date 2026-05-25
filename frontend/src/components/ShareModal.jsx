@@ -5,7 +5,7 @@ import api from '../services/api';
 const ShareModal = ({ file, isOpen, onClose, onShareCreated }) => {
   const [accessType, setAccessType] = useState('download');
   const [expiryDate, setExpiryDate] = useState('');
-  const [isPublic, setIsPublic] = useState(false);
+  const [isPublic, setIsPublic] = useState(true);
   const [shareLink, setShareLink] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
