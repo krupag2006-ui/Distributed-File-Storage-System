@@ -478,12 +478,6 @@ const downloadChunk = async (req, res, next) => {
       return res.status(404).json({ message: 'Chunk not found.' });
     }
 
-    if (Number(chunk.chunk_size) > maxTextPreviewChunkBytes) {
-      return res.status(413).json({
-        message: 'This chunk is too large for text preview. Download the chunk instead.'
-      });
-    }
-
     const { chunkBuffer } = await getChunkBuffer(chunk);
     const fileName = `${sanitizeBaseName(chunk.file_name)}_chunk_${chunk.chunk_index}.part`;
 
