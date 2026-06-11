@@ -8,7 +8,14 @@ const {
   uploadChunkToCloud
 } = require('../utils/supabaseStorage');
 const { calculateSha256 } = require('../utils/fileHash');
-const { buildTextPreview, isZipArchive } = require('../utils/textPreview');
+const {
+  buildChunkPreviewFromStoredText,
+  buildDirectChunkPreview,
+  buildStoredFilePreview,
+  buildTextPreview,
+  isDocument,
+  isZipArchive
+} = require('../utils/textPreview');
 const { supabasePrimaryBucket } = require('../config/supabase');
 const {
   createFile,
@@ -34,7 +41,19 @@ const sanitizeBaseName = (name) => {
 };
 
 const toNumber = (value) => Number.parseInt(value, 10);
-const maxTextPreviewChunkBytes = Number(process.env.MAX_TEXT_PREVIEW_CHUNK_BYTES || 1024 * 1024);
+const buildPreviewForFullFile = async ({ buffer, fileName, contentType }) => {
+  const preview = await buildStoredFilePreview({
+    buffer,
+    fileName,
+    contentType
+  });
+
+  return {
+    previewText: preview.hasReadableText ? preview.text : '',
+    previewMode: preview.hasReadableText ? preview.mode : null,
+    preview
+  };
+};
 
 const formatAnalytics = (analytics) => ({
   totalFiles: Number(analytics.total_files || 0),
@@ -46,13 +65,32 @@ const formatAnalytics = (analytics) => ({
 const formatChunk = (chunk) => ({
   id: chunk.id,
   file_id: chunk.file_id,
+  file_name: chunk.file_name,
+  file_size: chunk.file_size !== undefined ? Number(chunk.file_size) : undefined,
   chunk_index: chunk.chunk_index,
+  chunk_count: chunk.chunk_count,
   chunk_path: chunk.chunk_path,
   storage_bucket: chunk.storage_bucket || supabasePrimaryBucket,
   chunk_size: Number(chunk.chunk_size),
   chunk_hash: chunk.chunk_hash,
-  chunk_status: chunk.chunk_status
+  chunk_status: chunk.chunk_status,
+  preview: chunk.preview
 });
+
+const buildChunkPreviewFromMetadata = ({ chunk, metadata, maxChars }) => {
+  if (!metadata?.preview_text) {
+    return null;
+  }
+
+  return buildChunkPreviewFromStoredText({
+    previewText: metadata.preview_text,
+    previewMode: metadata.preview_mode,
+    fileName: chunk.file_name,
+    chunkIndex: chunk.chunk_index,
+    chunkCount: chunk.chunk_count,
+    maxChars
+  });
+};
 
 const activeReplicaSources = (replicas = []) =>
   replicas
@@ -167,21 +205,39 @@ const getMergedFileBufferForChunk = async (chunk, userId) => {
 const getReadableChunkText = async ({ chunk, userId, maxChars }) => {
   const metadata = await getFileMetadataByFileId(chunk.file_id);
   const contentType = metadata?.content_type || '';
-  const isArchive = isZipArchive({ contentType, fileName: chunk.file_name });
-  const archiveBuffer = isArchive ? await getMergedFileBufferForChunk(chunk, userId) : null;
+  const metadataPreview = buildChunkPreviewFromMetadata({ chunk, metadata, maxChars });
+
+  if (metadataPreview) {
+    return {
+      contentType,
+      preview: metadataPreview
+    };
+  }
+
+  const needsFullFilePreview =
+    isZipArchive({ contentType, fileName: chunk.file_name }) ||
+    isDocument({ contentType, fileName: chunk.file_name });
+  const archiveBuffer = needsFullFilePreview ? await getMergedFileBufferForChunk(chunk, userId) : null;
   const { chunkBuffer } = archiveBuffer
     ? { chunkBuffer: archiveBuffer }
     : await getChunkBuffer(chunk);
 
   return {
     contentType,
-    preview: buildTextPreview({
+    preview: archiveBuffer
+      ? await buildTextPreview({
+        buffer: chunkBuffer,
+        archiveBuffer,
+        contentType,
+        fileName: chunk.file_name,
+        chunkIndex: chunk.chunk_index,
+        chunkCount: chunk.chunk_count,
+        maxChars
+      })
+      : await buildDirectChunkPreview({
       buffer: chunkBuffer,
-      archiveBuffer,
       contentType,
       fileName: chunk.file_name,
-      chunkIndex: chunk.chunk_index,
-      chunkCount: chunk.chunk_count,
       maxChars
     })
   };
@@ -241,20 +297,44 @@ const uploadFile = async (req, res, next) => {
       }
     }
 
+    const { previewText, previewMode } = await buildPreviewForFullFile({
+      buffer: req.file.buffer,
+      fileName,
+      contentType: req.file.mimetype
+    });
+
     const fileMetadata = await createFileMetadata({
       fileId: createdFileId,
       contentType: req.file.mimetype,
-      checksum: calculateSha256(req.file.buffer)
+      checksum: calculateSha256(req.file.buffer),
+      previewText,
+      previewMode
     });
 
     const chunks = await getChunksByFile(createdFileId);
     const file = await getFileByIdForUser(createdFileId, req.user.id);
+    const metadataForPreview = {
+      preview_text: previewText,
+      preview_mode: previewMode
+    };
 
     return res.status(201).json({
       message: 'File uploaded, split into chunks, and saved successfully.',
       file,
       metadata: fileMetadata,
-      chunks: chunks.map(formatChunk)
+      chunks: chunks.map((chunk) =>
+        formatChunk({
+          ...chunk,
+          file_name: fileName,
+          file_size: fileSize,
+          chunk_count: chunkCount,
+          preview: buildChunkPreviewFromMetadata({
+            chunk: { ...chunk, file_name: fileName, chunk_count: chunkCount },
+            metadata: metadataForPreview,
+            maxChars: 12000
+          })
+        })
+      )
     });
   } catch (error) {
     if (createdFileId) {
@@ -287,9 +367,27 @@ const getChunks = async (req, res, next) => {
     }
 
     const chunks = await getChunksByFile(file.id);
+    const metadata = await getFileMetadataByFileId(file.id);
+
     return res.json({
       file,
-      chunks: chunks.map(formatChunk)
+      chunks: chunks.map((chunk) => {
+        const chunkWithFile = {
+          ...chunk,
+          file_name: file.file_name,
+          file_size: file.file_size,
+          chunk_count: file.chunk_count
+        };
+
+        return formatChunk({
+          ...chunkWithFile,
+          preview: buildChunkPreviewFromMetadata({
+            chunk: chunkWithFile,
+            metadata,
+            maxChars: 12000
+          })
+        });
+      })
     });
   } catch (error) {
     next(error);
@@ -447,17 +545,53 @@ const completeChunkedUpload = async (req, res, next) => {
       return res.status(409).json({ message: validationError });
     }
 
+    let previewText = '';
+    let previewMode = null;
+
+    try {
+      const replicas = await getReplicasByFile(file.id);
+      const mergedFile = await mergeChunks(attachReplicasToChunks(chunks, replicas));
+      const preview = await buildPreviewForFullFile({
+        buffer: mergedFile,
+        fileName: file.file_name,
+        contentType: req.body.contentType || 'application/octet-stream'
+      });
+
+      previewText = preview.previewText;
+      previewMode = preview.previewMode;
+    } catch (previewError) {
+      console.warn('Chunk preview extraction skipped:', previewError.message);
+    }
+
     const fileMetadata = await createFileMetadata({
       fileId: file.id,
       contentType: req.body.contentType || 'application/octet-stream',
-      checksum: req.body.checksum || ''
+      checksum: req.body.checksum || '',
+      previewText,
+      previewMode
     });
+    const metadataForPreview = {
+      preview_text: previewText,
+      preview_mode: previewMode
+    };
 
     return res.json({
       message: 'File uploaded, split into chunks, and saved successfully.',
       file,
       metadata: fileMetadata,
-      chunks: chunks.map(formatChunk)
+      chunks: chunks.map((chunk) =>
+        formatChunk({
+          ...chunk,
+          file_name: file.file_name,
+          file_size: file.file_size,
+          chunk_count: file.chunk_count,
+          preview: buildChunkPreviewFromMetadata({
+            chunk: { ...chunk, file_name: file.file_name, chunk_count: file.chunk_count },
+            metadata: metadataForPreview,
+            maxChars: 12000
+          })
+        })
+      )
     });
   } catch (error) {
     next(error);
@@ -504,18 +638,6 @@ const getChunkTextPreview = async (req, res, next) => {
 
     if (!chunk) {
       return res.status(404).json({ message: 'Chunk not found.' });
-    }
-
-    if (Number(chunk.chunk_size) > maxTextPreviewChunkBytes) {
-      return res.json({
-        chunk: formatChunk(chunk),
-        contentType: 'text/plain',
-        mode: 'large-chunk',
-        language: 'text',
-        sourceFiles: [],
-        text: 'This chunk is too large for inline preview on the current deployment. Use Download Chunk to open it locally.',
-        truncated: false
-      });
     }
 
     const { contentType, preview } = await getReadableChunkText({

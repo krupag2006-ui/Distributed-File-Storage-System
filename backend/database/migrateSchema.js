@@ -118,6 +118,8 @@ const ensureExtendedSchema = async () => {
       file_id INT NOT NULL UNIQUE,
       content_type VARCHAR(255),
       checksum VARCHAR(128),
+      preview_text LONGTEXT NULL,
+      preview_mode VARCHAR(32) NULL,
       status VARCHAR(32) NOT NULL DEFAULT 'healthy',
       last_verified_at TIMESTAMP NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -127,6 +129,9 @@ const ensureExtendedSchema = async () => {
         ON DELETE CASCADE
     ) ENGINE=InnoDB;
   `);
+
+  await ensureColumn('file_metadata', 'preview_text', 'preview_text LONGTEXT NULL AFTER checksum');
+  await ensureColumn('file_metadata', 'preview_mode', 'preview_mode VARCHAR(32) NULL AFTER preview_text');
 
   await ensureTable(`
     CREATE TABLE IF NOT EXISTS replicas (
