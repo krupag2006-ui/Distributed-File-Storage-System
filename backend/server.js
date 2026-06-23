@@ -15,21 +15,24 @@ const pool = require('./config/db');
 
 const app = express();
 const port = process.env.PORT || 5000;
+const normalizeOrigin = (origin) => origin.replace(/\/+$/, '').toLowerCase();
 const allowedOrigins = (process.env.CLIENT_URL || '')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+const normalizedAllowedOrigins = allowedOrigins.map(normalizeOrigin);
 
 app.use(
   cors({
     origin(origin, callback) {
-      if (!origin || !allowedOrigins.length || allowedOrigins.includes(origin)) {
+      if (!origin || !normalizedAllowedOrigins.length || normalizedAllowedOrigins.includes(normalizeOrigin(origin))) {
         return callback(null, true);
       }
 
       return callback(new Error('Not allowed by CORS'));
     },
     credentials: true,
+    optionsSuccessStatus: 204,
     exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type']
   })
 );
